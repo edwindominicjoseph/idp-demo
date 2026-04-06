@@ -1,0 +1,164 @@
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      boutique: ${{ steps.filter.outputs.boutique }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            boutique:
+              - 'apps/boutique/**'
+              - 'gitops/base/boutique/**'
+              - 'gitops/environments/**'
+              - '.github/workflows/ci-boutique.yaml'
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.boutique == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint YAML manifests
+        run: |
+          pip install yamllint
+          yamllint gitops/base/boutique/ gitops/environments/ || true
+
+      - name: Lint IaC with Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: gitops/
+          framework: kubernetes
+          soft_fail: true
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.boutique == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/idp-demo-boutique
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/boutique/
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  trivy-image:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan image for CVEs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/idp-demo-boutique:sha-${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Upload image scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+  trivy-iac:
+    needs: changes
+    if: needs.changes.outputs.boutique == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan IaC manifests
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: gitops/
+          format: sarif
+          output: trivy-iac.sarif
+          exit-code: "0"
+
+      - name: Upload IaC scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-iac.sarif
+          category: trivy-iac
+
+  pr-comment:
+    needs: [lint, build, trivy-image, trivy-iac]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post CI result summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              lint:       '${{ needs.lint.result }}',
+              build:      '${{ needs.build.result }}',
+              trivyImage: '${{ needs.trivy-image.result }}',
+              trivyIac:   '${{ needs.trivy-iac.result }}',
+            };
+            const icon = r => r === 'success' ? '✅' : r === 'skipped' ? '⏭️' : '❌';
+            const body = `## CI Results — IDP Demo Boutique App
+            | Stage | Result |
+            |---|---|
+            | Lint (YAML + Checkov) | ${icon(results.lint)} ${results.lint} |
+            | Build + Push (ghcr.io) | ${icon(results.build)} ${results.build} |
+            | Trivy Image Scan | ${icon(results.trivyImage)} ${results.trivyImage} |
+            | Trivy IaC Scan | ${icon(results.trivyIac)} ${results.trivyIac} |
+            
+            Image tag: \`sha-${{ github.sha }}\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+EOF

@@ -1,3 +1,5 @@
+name: CI — IDP Demo Boutique App
+
 on:
   push:
     branches: ["**"]
@@ -53,8 +55,13 @@ jobs:
     outputs:
       image: ${{ steps.meta.outputs.tags }}
       digest: ${{ steps.push.outputs.digest }}
+      short_sha: ${{ steps.sha.outputs.short }}        # CHANGE 1a — new output
     steps:
       - uses: actions/checkout@v4
+
+      - name: Get short SHA                            # CHANGE 1b — new step
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -93,10 +100,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Log in to ghcr.io                       # CHANGE 2a — new step
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Scan image for CVEs
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/idp-demo-boutique:sha-${{ github.sha }}
+          image-ref: ghcr.io/${{ github.repository_owner }}/idp-demo-boutique:sha-${{ needs.build.outputs.short_sha }}  # CHANGE 2b — was github.sha
           format: sarif
           output: trivy-image.sarif
           severity: CRITICAL,HIGH
@@ -154,7 +168,7 @@ jobs:
             | Trivy Image Scan | ${icon(results.trivyImage)} ${results.trivyImage} |
             | Trivy IaC Scan | ${icon(results.trivyIac)} ${results.trivyIac} |
             
-            Image tag: \`sha-${{ github.sha }}\``;
+            Image tag: \`sha-${{ needs.build.outputs.short_sha }}\``;  
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,

@@ -1,7 +1,8 @@
 controller:
   # ── Admin credentials ────────────────────────────────────────────────────
-  adminUser: "admin"
-  adminPassword: "changeme"          # Override via --set or a sealed secret
+  admin:
+    username: "admin"
+    password: "changeme"          # Override via --set or a sealed secret
 
   # ── Resource limits (single-node homelab tuned) ───────────────────────────
   resources:

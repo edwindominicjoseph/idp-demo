@@ -1,0 +1,270 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Jenkinsfile.prod
+// Triggered by GitHub webhook on push to `main` (after CI passes)
+// Flow: Manual approval → Baseline snapshot → Update image tag → Argo CD sync
+//       → Smoke tests → Rollback gate (5 min watch) → Notify + Audit
+// ─────────────────────────────────────────────────────────────────────────────
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'homelab-agent'
+            defaultContainer 'curl'
+        }
+    }
+
+    environment {
+        ARGOCD_SERVER      = 'argocd-server.argocd.svc.cluster.local'
+        ARGOCD_APP         = 'homelab-prod'
+        GIT_REPO           = 'https://github.com/<org>/homelab-platform.git'
+        GIT_BRANCH         = 'main'
+        KUSTOMIZE_PATH     = 'gitops/environments/prod/kustomization.yaml'
+        SMOKE_SCRIPT       = 'scripts/smoke-tests/svccomb-smoke.sh'
+        HEALTH_TIMEOUT     = '180'
+        PROMETHEUS_URL     = credentials('prometheus-api-url')   // e.g. http://prometheus.default:9090
+        ERROR_RATE_QUERY   = 'sum(rate(http_requests_total{status=~"5..",namespace="prod"}[1m])) / sum(rate(http_requests_total{namespace="prod"}[1m]))'
+        ERROR_RATE_THRESH  = '0.01'     // 1%
+        ROLLBACK_CHECKS    = '10'       // 10 × 30s = 5 min watch window
+        PUSHGATEWAY_URL    = 'http://prometheus-pushgateway.default:9091'
+    }
+
+    parameters {
+        string(name: 'SERVICE_NAME', defaultValue: '', description: 'Service being deployed (e.g. currency-service)')
+        string(name: 'IMAGE_TAG',    defaultValue: '', description: 'Image tag to deploy (e.g. sha-abc1234)')
+    }
+
+    stages {
+
+        // ── 1. Manual approval gate ───────────────────────────────────────
+        stage('Manual Approval Gate') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    input message: "Approve prod deploy for ${params.SERVICE_NAME}:${params.IMAGE_TAG}?",
+                          ok: 'Deploy to Prod'
+                }
+            }
+        }
+
+        // ── 2. Baseline snapshot ──────────────────────────────────────────
+        stage('Baseline Snapshot') {
+            steps {
+                container('curl') {
+                    withCredentials([string(
+                        credentialsId: 'github-token',
+                        variable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            git config --global user.email "jenkins@homelab"
+                            git config --global user.name  "Jenkins"
+
+                            git clone https://jenkins:${GIT_TOKEN}@github.com/<org>/homelab-platform.git repo
+                            cd repo && git checkout ${GIT_BRANCH}
+
+                            # Record current prod image tag as rollback reference
+                            CURRENT_TAG=$(grep "newTag:" ${KUSTOMIZE_PATH} | awk '{print $2}')
+                            echo "ROLLBACK_TAG=${CURRENT_TAG}" > /tmp/baseline.env
+
+                            # Snapshot current Prometheus error rate (5-min window)
+                            BASELINE_RATE=$(curl -s "${PROMETHEUS_URL}/api/v1/query" \
+                                --data-urlencode "query=sum(rate(http_requests_total{status=~\\\"5..\\\",namespace=\\\"prod\\\"}[5m])) / sum(rate(http_requests_total{namespace=\\\"prod\\\"}[5m]))" \
+                                | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['result'][0]['value'][1] if d['data']['result'] else '0')")
+
+                            echo "Baseline error rate: ${BASELINE_RATE}"
+                            echo "BASELINE_RATE=${BASELINE_RATE}" >> /tmp/baseline.env
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ── 3. Update image tag in Git ────────────────────────────────────
+        stage('Update Image Tag') {
+            steps {
+                container('kubectl') {
+                    sh '''
+                        cd repo
+                        sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|" ${KUSTOMIZE_PATH}
+                        git add ${KUSTOMIZE_PATH}
+                        git commit -m "chore(prod): deploy ${SERVICE_NAME}:${IMAGE_TAG} [skip ci]"
+                        git push origin ${GIT_BRANCH}
+
+                        # Store new commit SHA for status reporting
+                        git rev-parse HEAD > /tmp/deploy_sha
+                    '''
+                }
+            }
+        }
+
+        // ── 4. Argo CD sync ───────────────────────────────────────────────
+        stage('Argo CD Sync — Prod') {
+            steps {
+                container('argocd') {
+                    withCredentials([string(
+                        credentialsId: 'argocd-token-prod',
+                        variable: 'ARGOCD_AUTH_TOKEN'
+                    )]) {
+                        sh '''
+                            argocd app sync ${ARGOCD_APP} \
+                                --server     ${ARGOCD_SERVER} \
+                                --auth-token ${ARGOCD_AUTH_TOKEN} \
+                                --insecure \
+                                --prune
+
+                            argocd app wait ${ARGOCD_APP} \
+                                --server     ${ARGOCD_SERVER} \
+                                --auth-token ${ARGOCD_AUTH_TOKEN} \
+                                --insecure \
+                                --health \
+                                --timeout    ${HEALTH_TIMEOUT}
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ── 5. Smoke tests ────────────────────────────────────────────────
+        stage('Smoke Tests') {
+            steps {
+                container('curl') {
+                    sh '''
+                        chmod +x repo/${SMOKE_SCRIPT}
+                        repo/${SMOKE_SCRIPT} prod
+                    '''
+                }
+            }
+        }
+
+        // ── 6. Rollback gate — 5 min watch ───────────────────────────────
+        stage('Rollback Gate — 5 min watch') {
+            steps {
+                container('curl') {
+                    sh '''
+                        source /tmp/baseline.env
+                        BREACH_COUNT=0
+
+                        echo "Starting rollback gate: ${ROLLBACK_CHECKS} checks × 30s = 5 min window"
+                        echo "Threshold: error rate > ${ERROR_RATE_THRESH} for 2 consecutive checks triggers rollback"
+
+                        for i in $(seq 1 ${ROLLBACK_CHECKS}); do
+                            sleep 30
+
+                            RATE=$(curl -s "${PROMETHEUS_URL}/api/v1/query" \
+                                --data-urlencode "query=${ERROR_RATE_QUERY}" \
+                                | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['result'][0]['value'][1] if d['data']['result'] else '0')")
+
+                            echo "Check ${i}/${ROLLBACK_CHECKS} — error rate: ${RATE}"
+
+                            if python3 -c "exit(0 if float('${RATE}') > float('${ERROR_RATE_THRESH}') else 1)"; then
+                                BREACH_COUNT=$((BREACH_COUNT + 1))
+                                echo "⚠️  Breach ${BREACH_COUNT}/2 detected (rate=${RATE})"
+                            else
+                                BREACH_COUNT=0
+                            fi
+
+                            if [ "${BREACH_COUNT}" -ge 2 ]; then
+                                echo "❌ Error rate breached threshold for 2 consecutive checks — initiating rollback"
+
+                                # Revert image tag in Git
+                                cd repo
+                                sed -i "s|newTag:.*|newTag: ${ROLLBACK_TAG}|" ${KUSTOMIZE_PATH}
+                                git add ${KUSTOMIZE_PATH}
+                                git commit -m "revert(prod): rollback ${SERVICE_NAME} to ${ROLLBACK_TAG} [skip ci]"
+                                git push origin ${GIT_BRANCH}
+
+                                # Re-sync Argo CD to apply revert
+                                argocd app sync ${ARGOCD_APP} \
+                                    --server     ${ARGOCD_SERVER} \
+                                    --auth-token ${ARGOCD_AUTH_TOKEN} \
+                                    --insecure \
+                                    --prune
+
+                                argocd app wait ${ARGOCD_APP} \
+                                    --server     ${ARGOCD_SERVER} \
+                                    --auth-token ${ARGOCD_AUTH_TOKEN} \
+                                    --insecure \
+                                    --health \
+                                    --timeout    ${HEALTH_TIMEOUT}
+
+                                echo "Rollback complete — prod restored to ${ROLLBACK_TAG}"
+                                exit 1    # Fail the build with ROLLBACK status
+                            fi
+                        done
+
+                        echo "✅ Rollback gate passed — error rate within threshold for full 5 min window"
+                    '''
+                }
+            }
+        }
+
+        // ── 7. Notify + Audit ─────────────────────────────────────────────
+        stage('Notify + Audit') {
+            steps {
+                container('curl') {
+                    withCredentials([string(
+                        credentialsId: 'github-token-status',
+                        variable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            DEPLOY_SHA=$(cat /tmp/deploy_sha)
+                            DEPLOY_TIME=$(date +%s)
+
+                            # GitHub commit status
+                            curl -s -X POST \
+                                -H "Authorization: token ${GIT_TOKEN}" \
+                                -H "Content-Type: application/json" \
+                                -d "{\"state\":\"success\",\"description\":\"Prod deploy succeeded\",\"context\":\"jenkins/prod\"}" \
+                                "https://api.github.com/repos/<org>/homelab-platform/statuses/${DEPLOY_SHA}"
+
+                            # Emit deploy event to Prometheus Pushgateway (DORA: deploy frequency)
+                            cat <<EOF | curl -s --data-binary @- "${PUSHGATEWAY_URL}/metrics/job/jenkins/instance/prod"
+# HELP homelab_deploy_total Total prod deploys
+# TYPE homelab_deploy_total counter
+homelab_deploy_total{service="${SERVICE_NAME}",env="prod",result="success"} 1
+# HELP homelab_deploy_timestamp_seconds Unix timestamp of last prod deploy
+# TYPE homelab_deploy_timestamp_seconds gauge
+homelab_deploy_timestamp_seconds{service="${SERVICE_NAME}",env="prod"} ${DEPLOY_TIME}
+EOF
+
+                            echo "✅ Prod deploy of ${SERVICE_NAME}:${IMAGE_TAG} complete"
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Post-build ─────────────────────────────────────────────────────────
+    post {
+        failure {
+            container('curl') {
+                withCredentials([string(
+                    credentialsId: 'github-token-status',
+                    variable: 'GIT_TOKEN'
+                )]) {
+                    sh '''
+                        DEPLOY_SHA=$(cat /tmp/deploy_sha 2>/dev/null || echo "unknown")
+                        DEPLOY_TIME=$(date +%s)
+
+                        # GitHub commit status — failure
+                        curl -s -X POST \
+                            -H "Authorization: token ${GIT_TOKEN}" \
+                            -H "Content-Type: application/json" \
+                            -d "{\"state\":\"failure\",\"description\":\"Prod deploy failed or rolled back\",\"context\":\"jenkins/prod\"}" \
+                            "https://api.github.com/repos/<org>/homelab-platform/statuses/${DEPLOY_SHA}" || true
+
+                        # Emit rollback event to Pushgateway (DORA: change failure rate)
+                        cat <<EOF | curl -s --data-binary @- "${PUSHGATEWAY_URL}/metrics/job/jenkins/instance/prod"
+# HELP homelab_deploy_total Total prod deploys
+# TYPE homelab_deploy_total counter
+homelab_deploy_total{service="${SERVICE_NAME}",env="prod",result="rollback"} 1
+homelab_deploy_timestamp_seconds{service="${SERVICE_NAME}",env="prod"} ${DEPLOY_TIME}
+EOF
+                    '''
+                }
+            }
+        }
+        always {
+            echo "Prod pipeline complete — ${currentBuild.currentResult}"
+        }
+    }
+}

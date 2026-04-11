@@ -233,35 +233,11 @@ EOF
         }
     }
 
+
     // ── Post-build ─────────────────────────────────────────────────────────
     post {
         failure {
-            container('curl') {
-                withCredentials([string(
-                    credentialsId: 'github-token-status',
-                    variable: 'GIT_TOKEN'
-                )]) {
-                    sh '''
-                        DEPLOY_SHA=$(cat /tmp/deploy_sha 2>/dev/null || echo "unknown")
-                        DEPLOY_TIME=$(date +%s)
-
-                        # GitHub commit status — failure
-                        curl -s -X POST \
-                            -H "Authorization: token ${GIT_TOKEN}" \
-                            -H "Content-Type: application/json" \
-                            -d "{\"state\":\"failure\",\"description\":\"Prod deploy failed or rolled back\",\"context\":\"jenkins/prod\"}" \
-                            "https://api.github.com/repos/<org>/homelab-platform/statuses/${DEPLOY_SHA}" || true
-
-                        # Emit rollback event to Pushgateway (DORA: change failure rate)
-                        cat <<EOF | curl -s --data-binary @- "${PUSHGATEWAY_URL}/metrics/job/jenkins/instance/prod"
-# HELP homelab_deploy_total Total prod deploys
-# TYPE homelab_deploy_total counter
-homelab_deploy_total{service="${SERVICE_NAME}",env="prod",result="rollback"} 1
-homelab_deploy_timestamp_seconds{service="${SERVICE_NAME}",env="prod"} ${DEPLOY_TIME}
-EOF
-                    '''
-                }
-            }
+            echo "Prod pipeline FAILED or ROLLED BACK"
         }
         always {
             echo "Prod pipeline complete — ${currentBuild.currentResult}"

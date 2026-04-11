@@ -124,21 +124,7 @@ pipeline {
     // ── Post-build ─────────────────────────────────────────────────────────
     post {
         failure {
-            container('curl') {
-                withCredentials([string(
-                    credentialsId: 'github-token-status',
-                    variable: 'GIT_TOKEN'
-                )]) {
-                    sh '''
-                        COMMIT_SHA=$(cd repo && git rev-parse HEAD 2>/dev/null || echo "unknown")
-                        curl -s -X POST \
-                            -H "Authorization: token ${GIT_TOKEN}" \
-                            -H "Content-Type: application/json" \
-                            -d "{\"state\":\"failure\",\"description\":\"Staging deploy failed\",\"context\":\"jenkins/staging\"}" \
-                            "https://api.github.com/repos/<org>/homelab-platform/statuses/${COMMIT_SHA}" || true
-                    '''
-                }
-            }
+            echo "Staging pipeline FAILED"
         }
         always {
             echo "Staging pipeline complete — ${currentBuild.currentResult}"

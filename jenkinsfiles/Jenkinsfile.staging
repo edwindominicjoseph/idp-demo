@@ -1,0 +1,147 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Jenkinsfile.staging
+// Triggered by GitHub webhook on push to `develop` (after CI passes)
+// Flow: Update image tag in Git → Argo CD sync → Smoke tests → Notify
+// ─────────────────────────────────────────────────────────────────────────────
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'homelab-agent'
+            defaultContainer 'curl'
+        }
+    }
+
+    environment {
+        ARGOCD_SERVER    = 'argocd-server.argocd.svc.cluster.local'
+        ARGOCD_APP       = 'homelab-staging'
+        GIT_REPO         = 'https://github.com/<org>/homelab-platform.git'
+        GIT_BRANCH       = 'develop'
+        KUSTOMIZE_PATH   = 'gitops/environments/staging/kustomization.yaml'
+        SMOKE_SCRIPT     = 'scripts/smoke-tests/svccomb-smoke.sh'
+        HEALTH_TIMEOUT   = '120'
+    }
+
+    parameters {
+        string(name: 'SERVICE_NAME', defaultValue: '', description: 'Service being deployed (e.g. currency-service)')
+        string(name: 'IMAGE_TAG',    defaultValue: '', description: 'Image tag to deploy (e.g. sha-abc1234)')
+    }
+
+    stages {
+
+        // ── 1. Update image tag in Git ────────────────────────────────────
+        stage('Update Image Tag') {
+            steps {
+                container('kubectl') {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            git config --global user.email "jenkins@homelab"
+                            git config --global user.name  "Jenkins"
+
+                            git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/<org>/homelab-platform.git repo
+                            cd repo
+
+                            git checkout ${GIT_BRANCH}
+
+                            # Patch the image tag in the staging Kustomize overlay
+                            sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|" ${KUSTOMIZE_PATH}
+
+                            git add ${KUSTOMIZE_PATH}
+                            git commit -m "chore(staging): deploy ${SERVICE_NAME}:${IMAGE_TAG} [skip ci]"
+                            git push origin ${GIT_BRANCH}
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ── 2. Argo CD sync ───────────────────────────────────────────────
+        stage('Argo CD Sync — Staging') {
+            steps {
+                container('argocd') {
+                    withCredentials([string(
+                        credentialsId: 'argocd-token-staging',
+                        variable: 'ARGOCD_AUTH_TOKEN'
+                    )]) {
+                        sh '''
+                            argocd app sync ${ARGOCD_APP} \
+                                --server  ${ARGOCD_SERVER} \
+                                --auth-token ${ARGOCD_AUTH_TOKEN} \
+                                --insecure \
+                                --prune
+
+                            argocd app wait ${ARGOCD_APP} \
+                                --server  ${ARGOCD_SERVER} \
+                                --auth-token ${ARGOCD_AUTH_TOKEN} \
+                                --insecure \
+                                --health \
+                                --timeout ${HEALTH_TIMEOUT}
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ── 3. Smoke tests ────────────────────────────────────────────────
+        stage('Smoke Tests') {
+            steps {
+                container('curl') {
+                    sh '''
+                        chmod +x repo/${SMOKE_SCRIPT}
+                        repo/${SMOKE_SCRIPT} staging
+                    '''
+                }
+            }
+        }
+
+        // ── 4. Notify ─────────────────────────────────────────────────────
+        stage('Notify') {
+            steps {
+                container('curl') {
+                    withCredentials([string(
+                        credentialsId: 'github-token-status',
+                        variable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            # Update GitHub commit status to success
+                            COMMIT_SHA=$(cd repo && git rev-parse HEAD)
+                            curl -s -X POST \
+                                -H "Authorization: token ${GIT_TOKEN}" \
+                                -H "Content-Type: application/json" \
+                                -d "{\"state\":\"success\",\"description\":\"Staging deploy succeeded\",\"context\":\"jenkins/staging\"}" \
+                                "https://api.github.com/repos/<org>/homelab-platform/statuses/${COMMIT_SHA}"
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Post-build ─────────────────────────────────────────────────────────
+    post {
+        failure {
+            container('curl') {
+                withCredentials([string(
+                    credentialsId: 'github-token-status',
+                    variable: 'GIT_TOKEN'
+                )]) {
+                    sh '''
+                        COMMIT_SHA=$(cd repo && git rev-parse HEAD 2>/dev/null || echo "unknown")
+                        curl -s -X POST \
+                            -H "Authorization: token ${GIT_TOKEN}" \
+                            -H "Content-Type: application/json" \
+                            -d "{\"state\":\"failure\",\"description\":\"Staging deploy failed\",\"context\":\"jenkins/staging\"}" \
+                            "https://api.github.com/repos/<org>/homelab-platform/statuses/${COMMIT_SHA}" || true
+                    '''
+                }
+            }
+        }
+        always {
+            echo "Staging pipeline complete — ${currentBuild.currentResult}"
+        }
+    }
+}

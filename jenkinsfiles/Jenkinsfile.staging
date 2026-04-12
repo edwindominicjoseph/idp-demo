@@ -22,7 +22,7 @@ pipeline {
         stage('Validate Agent') {
             steps {
                 container('kubectl') {
-                    sh 'kubectl version --client'
+                    sh 'kubectl version --client=true'
                 }
                 container('argocd') {
                     sh 'argocd version --client'

@@ -4,11 +4,11 @@ kind: Kustomization
 resources:
 - ../../base/boutique
 
-namespace: staging
+namespace: prod
 
 # Jenkins patches the newTag for the specific service that was built:
 #   sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" \
-#     gitops/environments/staging/kustomization.yaml
+#     gitops/environments/prod/kustomization.yaml
 images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-boutique
   newTag: sha-latest

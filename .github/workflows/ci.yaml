@@ -1,0 +1,229 @@
+name: CI — IDP Demo
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+
+  # ── Detect which services changed ──────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            boutique:
+              - 'apps/boutique/**'
+              - '.github/workflows/ci.yaml'
+            adservice:
+              - 'apps/adservice/**'
+              - '.github/workflows/ci.yaml'
+            cartservice:
+              - 'apps/cartservice/**'
+              - '.github/workflows/ci.yaml'
+            checkoutservice:
+              - 'apps/checkoutservice/**'
+              - '.github/workflows/ci.yaml'
+            currencyservice:
+              - 'apps/currencyservice/**'
+              - '.github/workflows/ci.yaml'
+            emailservice:
+              - 'apps/emailservice/**'
+              - '.github/workflows/ci.yaml'
+            loadgenerator:
+              - 'apps/loadgenerator/**'
+              - '.github/workflows/ci.yaml'
+            paymentservice:
+              - 'apps/paymentservice/**'
+              - '.github/workflows/ci.yaml'
+            productcatalogservice:
+              - 'apps/productcatalogservice/**'
+              - '.github/workflows/ci.yaml'
+            recommendationservice:
+              - 'apps/recommendationservice/**'
+              - '.github/workflows/ci.yaml'
+            shippingservice:
+              - 'apps/shippingservice/**'
+              - '.github/workflows/ci.yaml'
+
+  # ── Lint manifests (runs if any service changed) ───────────────────────────
+  lint:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint YAML manifests
+        run: |
+          pip install yamllint
+          yamllint gitops/base/boutique/ gitops/environments/ || true
+
+      - name: Lint IaC with Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: gitops/
+          framework: kubernetes
+          soft_fail: true
+
+  # ── Build + push — one job per changed service (matrix) ───────────────────
+  build:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+      fail-fast: false   # other services keep building if one fails
+    outputs:
+      short_sha: ${{ steps.sha.outputs.short }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/idp-demo-${{ matrix.service }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/${{ matrix.service }}/
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ── Trivy image scan — one job per changed service (matrix) ───────────────
+  trivy-image:
+    needs: [changes, build]
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan image for CVEs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/idp-demo-${{ matrix.service }}:sha-${{ steps.sha.outputs.short }}
+          format: sarif
+          output: trivy-image-${{ matrix.service }}.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Upload image scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image-${{ matrix.service }}.sarif
+          category: trivy-image-${{ matrix.service }}
+
+  # ── Trivy IaC scan ─────────────────────────────────────────────────────────
+  trivy-iac:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan IaC manifests
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: gitops/
+          format: sarif
+          output: trivy-iac.sarif
+          exit-code: "0"
+
+      - name: Upload IaC scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-iac.sarif
+          category: trivy-iac
+
+  # ── PR comment ─────────────────────────────────────────────────────────────
+  pr-comment:
+    needs: [lint, build, trivy-image, trivy-iac]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Post CI result summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              lint:       '${{ needs.lint.result }}',
+              build:      '${{ needs.build.result }}',
+              trivyImage: '${{ needs.trivy-image.result }}',
+              trivyIac:   '${{ needs.trivy-iac.result }}',
+            };
+            const services = ${{ needs.changes.outputs.services }};
+            const icon = r => r === 'success' ? '✅' : r === 'skipped' ? '⏭️' : '❌';
+            const body = `## CI Results — IDP Demo
+            | Stage | Result |
+            |---|---|
+            | Lint (YAML + Checkov) | ${icon(results.lint)} ${results.lint} |
+            | Build + Push (ghcr.io) | ${icon(results.build)} ${results.build} |
+            | Trivy Image Scan | ${icon(results.trivyImage)} ${results.trivyImage} |
+            | Trivy IaC Scan | ${icon(results.trivyIac)} ${results.trivyIac} |
+
+            **Services built:** \`${services.join(', ')}\`
+            **Image tag:** \`sha-${{ steps.sha.outputs.short }}\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });

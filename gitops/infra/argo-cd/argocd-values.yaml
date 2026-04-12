@@ -73,10 +73,25 @@ redis:
 configs:
   params:
     server.insecure: true
+
+  # ── Local accounts for Jenkins pipelines ─────────────────────────────────
+  cm:
+    accounts.jenkins-staging: apiKey
+    accounts.jenkins-prod: apiKey
+
   rbac:
     policy.default: role:readonly
     policy.csv: |
+      # Admin
       p, role:admin, applications, *, */*, allow
       p, role:admin, clusters, *, *, allow
       p, role:admin, repositories, *, *, allow
       g, admin, role:admin
+
+      # Jenkins staging — sync + get homelab-staging only
+      p, jenkins-staging, applications, sync, default/homelab-staging, allow
+      p, jenkins-staging, applications, get,  default/homelab-staging, allow
+
+      # Jenkins prod — sync + get homelab-prod only
+      p, jenkins-prod, applications, sync, default/homelab-prod, allow
+      p, jenkins-prod, applications, get,  default/homelab-prod, allow

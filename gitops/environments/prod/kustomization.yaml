@@ -11,24 +11,24 @@ namespace: prod
 #     gitops/environments/prod/kustomization.yaml
 images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-boutique
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-adservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-cartservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-checkoutservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-currencyservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-emailservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-loadgenerator
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-paymentservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-productcatalogservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-recommendationservice
-  newTag: sha-latest
+  newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-shippingservice
-  newTag: sha-latest
+  newTag: 

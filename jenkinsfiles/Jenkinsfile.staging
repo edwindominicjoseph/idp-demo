@@ -1,13 +1,45 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Jenkinsfile.staging — Phase 2 validation version
 // Full pipeline will be wired in Phase 3 (Argo CD) and Phase 5 (smoke tests)
+// Single multi-tool container (alpine/k8s) instead of per-tool containers
 // ─────────────────────────────────────────────────────────────────────────────
 
 pipeline {
     agent {
         kubernetes {
             label 'homelab-agent'
-            defaultContainer 'curl'
+            defaultContainer 'tools'
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: tools
+    image: alpine/k8s:1.29.2
+    command: [sleep]
+    args: ["99d"]
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+  - name: maven
+    image: maven:3.9-eclipse-temurin-17
+    command: [sleep]
+    args: ["99d"]
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+    env:
+    - name: MAVEN_OPTS
+      value: "-Xms128m -Xmx768m"
+'''
         }
     }
 
@@ -18,49 +50,74 @@ pipeline {
 
     stages {
 
-        // ── 1. Validate agent pod containers are available ────────────────
-        stage('Validate Agent') {
+        // ── 1. Validate tools ─────────────────────────────────────────────
+        stage('Validate Tools') {
             steps {
-                container('kubectl') {
-                    sh 'kubectl version --client=true'
-                }
-                container('argocd') {
-                    sh 'argocd version --client'
-                }
-                container('curl') {
-                    sh 'curl --version'
-                }
-                container('maven') {
-                    sh 'mvn --version'
-                }
-            }
-        }
-// ── 2. Git Clone ─────────────────────────────────────────────────────────
-        stage('Git Clone') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'github-token',
-                    usernameVariable: 'GIT_USER',
-                    passwordVariable: 'GIT_TOKEN'
-                )]) {
+                container('tools') {
                     sh '''
-                        git config --global user.email "jenkins@homelab"
-                        git config --global user.name  "Jenkins"
-                        git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git repo
-                        echo "Cloned successfully"
-                        ls repo/
+                        echo "=== kubectl ==="
+                        kubectl version --client=true
+
+                        echo "=== curl ==="
+                        curl --version | head -1
+
+                        echo "=== git ==="
+                        git --version
+
+                        echo "=== helm ==="
+                        helm version --short
+
+                        echo "=== argocd CLI ==="
+                        curl -sSL -o /usr/local/bin/argocd \
+                          https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                        chmod +x /usr/local/bin/argocd
+                        argocd version --client --short
                     '''
                 }
             }
-}
-        // ── 3. Placeholder — Argo CD sync (wired in Phase 3) ─────────────
+        }
+
+        // ── 2. Validate maven ─────────────────────────────────────────────
+        stage('Validate Maven') {
+            steps {
+                container('maven') {
+                    sh '''
+                        echo "=== maven ==="
+                        mvn --version
+                    '''
+                }
+            }
+        }
+
+        // ── 3. Git Clone ──────────────────────────────────────────────────
+        stage('Git Clone') {
+            steps {
+                container('tools') {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            git config --global user.email "jenkins@homelab"
+                            git config --global user.name  "Jenkins"
+                            git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git repo
+                            echo "Cloned successfully"
+                            ls repo/
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ── 4. Placeholder — Argo CD sync (wired in Phase 3) ─────────────
         stage('Argo CD Sync') {
             steps {
                 echo "Argo CD not yet installed — will be wired in Phase 3"
             }
         }
 
-        // ── 4. Placeholder — Smoke tests (wired in Phase 5) ──────────────
+        // ── 5. Placeholder — Smoke tests (wired in Phase 5) ──────────────
         stage('Smoke Tests') {
             steps {
                 echo "Smoke tests not yet written — will be wired in Phase 5"

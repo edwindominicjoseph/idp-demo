@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Jenkinsfile.staging — Phase 2 validation version
-// Full pipeline will be wired in Phase 3 (Argo CD) and Phase 5 (smoke tests)
-// Single multi-tool container (alpine/k8s) instead of per-tool containers
+// Jenkinsfile.staging
+// Triggered by GitHub webhook on push to `develop`
+// Flow: Validate tools → Update image tag in Git → Argo CD sync → Wait healthy
 // ─────────────────────────────────────────────────────────────────────────────
 
 pipeline {
@@ -43,9 +43,17 @@ spec:
         }
     }
 
+    environment {
+        ARGOCD_SERVER   = 'argo-cd-argocd-server.argo-cd.svc.cluster.local'
+        ARGOCD_APP      = 'homelab-staging'
+        GIT_BRANCH      = 'develop'
+        KUSTOMIZE_PATH  = 'gitops/environments/staging/kustomization.yaml'
+        HEALTH_TIMEOUT  = '120'
+    }
+
     parameters {
         string(name: 'SERVICE_NAME', defaultValue: 'boutique', description: 'Service being deployed')
-        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag to deploy')
+        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag to deploy (e.g. sha-abc1234)')
     }
 
     stages {
@@ -77,20 +85,8 @@ spec:
             }
         }
 
-        // ── 2. Validate maven ─────────────────────────────────────────────
-        stage('Validate Maven') {
-            steps {
-                container('maven') {
-                    sh '''
-                        echo "=== maven ==="
-                        mvn --version
-                    '''
-                }
-            }
-        }
-
-        // ── 3. Git Clone ──────────────────────────────────────────────────
-        stage('Git Clone') {
+        // ── 2. Update image tag in Git ────────────────────────────────────
+        stage('Update Image Tag') {
             steps {
                 container('tools') {
                     withCredentials([usernamePassword(
@@ -101,23 +97,55 @@ spec:
                         sh '''
                             git config --global user.email "jenkins@homelab"
                             git config --global user.name  "Jenkins"
+
                             git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git repo
-                            echo "Cloned successfully"
-                            ls repo/
+                            cd repo
+                            git checkout ${GIT_BRANCH}
+
+                            # Patch only this service's newTag — leaves other services unchanged
+                            sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" ${KUSTOMIZE_PATH}
+
+                            git add ${KUSTOMIZE_PATH}
+                            git commit -m "ci(staging): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
+                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
+
+                            echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
                         '''
                     }
                 }
             }
         }
 
-        // ── 4. Placeholder — Argo CD sync (wired in Phase 3) ─────────────
+        // ── 3. Argo CD sync ───────────────────────────────────────────────
         stage('Argo CD Sync') {
             steps {
-                echo "Argo CD not yet installed — will be wired in Phase 3"
+                container('tools') {
+                    withCredentials([string(
+                        credentialsId: 'argocd-token-staging',
+                        variable: 'ARGOCD_TOKEN'
+                    )]) {
+                        sh '''
+                            argocd login ${ARGOCD_SERVER} \
+                              --auth-token ${ARGOCD_TOKEN} \
+                              --insecure \
+                              --grpc-web
+
+                            argocd app sync ${ARGOCD_APP} --insecure
+
+                            echo "Waiting for ${ARGOCD_APP} to become healthy (timeout: ${HEALTH_TIMEOUT}s)..."
+                            argocd app wait ${ARGOCD_APP} \
+                              --health \
+                              --timeout ${HEALTH_TIMEOUT} \
+                              --insecure
+
+                            echo "Sync complete — ${ARGOCD_APP} is healthy"
+                        '''
+                    }
+                }
             }
         }
 
-        // ── 5. Placeholder — Smoke tests (wired in Phase 5) ──────────────
+        // ── 4. Smoke tests (wired in Phase 5) ────────────────────────────
         stage('Smoke Tests') {
             steps {
                 echo "Smoke tests not yet written — will be wired in Phase 5"
@@ -126,6 +154,9 @@ spec:
     }
 
     post {
+        failure {
+            echo "Staging pipeline FAILED — ${params.SERVICE_NAME}:${params.IMAGE_TAG}"
+        }
         always {
             echo "Staging pipeline complete — ${currentBuild.currentResult}"
         }

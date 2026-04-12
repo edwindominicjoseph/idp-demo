@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: homelab-staging
+  namespace: argo-cd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/edwindominicjoseph/idp-demo.git
+    targetRevision: develop
+    path: gitops/environments/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

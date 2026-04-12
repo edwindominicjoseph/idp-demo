@@ -2,8 +2,7 @@
 // Jenkinsfile.prod
 // Triggered by GitHub webhook on push to `main` (after CI passes)
 // Flow: Manual approval → Baseline snapshot → Update image tag → Argo CD sync
-//       → Smoke tests → Rollback gate (5 min watch) → Notify + Audit
-// Single multi-tool container (alpine/k8s) instead of per-tool containers
+//       → Wait healthy → Smoke tests → Rollback gate (5 min watch) → Notify + Audit
 // ─────────────────────────────────────────────────────────────────────────────
 
 pipeline {
@@ -46,7 +45,7 @@ spec:
     }
 
     environment {
-        ARGOCD_SERVER      = 'argocd-server.argocd.svc.cluster.local'
+        ARGOCD_SERVER      = 'argo-cd-argocd-server.argo-cd.svc.cluster.local'
         ARGOCD_APP         = 'homelab-prod'
         GIT_BRANCH         = 'main'
         KUSTOMIZE_PATH     = 'gitops/environments/prod/kustomization.yaml'
@@ -103,17 +102,63 @@ spec:
             }
         }
 
-        // ── 3. Update image tag in Git (Phase 3 — Kustomize not yet set up) ─
+        // ── 3. Update image tag in Git ────────────────────────────────────
         stage('Update Image Tag') {
             steps {
-                echo "Kustomize overlays not yet set up — will be wired in Phase 3"
+                container('tools') {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            cd repo
+
+                            # Patch only this service's newTag — leaves other services unchanged
+                            sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" ${KUSTOMIZE_PATH}
+
+                            git add ${KUSTOMIZE_PATH}
+                            git commit -m "ci(prod): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
+                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
+
+                            echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                        '''
+                    }
+                }
             }
         }
 
-        // ── 4. Argo CD sync (Phase 3 — Argo CD not yet installed) ────────
+        // ── 4. Argo CD sync ───────────────────────────────────────────────
         stage('Argo CD Sync — Prod') {
             steps {
-                echo "Argo CD not yet installed — will be wired in Phase 3"
+                container('tools') {
+                    withCredentials([string(
+                        credentialsId: 'argocd-token-prod',
+                        variable: 'ARGOCD_TOKEN'
+                    )]) {
+                        sh '''
+                            # Install argocd CLI
+                            curl -sSL -o /usr/local/bin/argocd \
+                              https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                            chmod +x /usr/local/bin/argocd
+
+                            argocd login ${ARGOCD_SERVER} \
+                              --auth-token ${ARGOCD_TOKEN} \
+                              --insecure \
+                              --grpc-web
+
+                            argocd app sync ${ARGOCD_APP} --insecure
+
+                            echo "Waiting for ${ARGOCD_APP} to become healthy (timeout: ${HEALTH_TIMEOUT}s)..."
+                            argocd app wait ${ARGOCD_APP} \
+                              --health \
+                              --timeout ${HEALTH_TIMEOUT} \
+                              --insecure
+
+                            echo "Sync complete — ${ARGOCD_APP} is healthy"
+                        '''
+                    }
+                }
             }
         }
 

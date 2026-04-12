@@ -35,28 +35,24 @@ pipeline {
                 }
             }
         }
-
-        // ── 2. Placeholder — Git clone (Phase 3 will add image tag patch) ─
+// ── 2. Git Clone ─────────────────────────────────────────────────────────
         stage('Git Clone') {
             steps {
-                container('curl') {
-                    withCredentials([usernamePassword(
-                        credentialsId: 'github-token',
-                        usernameVariable: 'GIT_USER',
-                        passwordVariable: 'GIT_TOKEN'
-                    )]) {
-                        sh '''
-                            git config --global user.email "jenkins@homelab"
-                            git config --global user.name  "Jenkins"
-                            git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/<org>/homelab-platform.git repo
-                            echo "Cloned successfully"
-                            ls repo/
-                        '''
-                    }
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-token',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_TOKEN'
+                )]) {
+                    sh '''
+                        git config --global user.email "jenkins@homelab"
+                        git config --global user.name  "Jenkins"
+                        git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git repo
+                        echo "Cloned successfully"
+                        ls repo/
+                    '''
                 }
             }
-        }
-
+}
         // ── 3. Placeholder — Argo CD sync (wired in Phase 3) ─────────────
         stage('Argo CD Sync') {
             steps {

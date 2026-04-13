@@ -20,27 +20,21 @@ spec:
     args: ["99d"]
     resources:
       requests:
-        cpu: "200m"
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "300m"
         memory: "256Mi"
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
-  - name: maven
-    image: maven:3.9-eclipse-temurin-17
-    command: [sleep]
-    args: ["99d"]
-    resources:
-      requests:
-        cpu: "200m"
-        memory: "512Mi"
-      limits:
-        cpu: "1"
-        memory: "1Gi"
-    env:
-    - name: MAVEN_OPTS
-      value: "-Xms128m -Xmx768m"
 '''
         }
+    }
+
+    options {
+        throttleJobProperty(
+            categories: ['homelab-deploy'],
+            throttleEnabled: true,
+            throttleOption: 'category'
+        )
     }
 
     environment {

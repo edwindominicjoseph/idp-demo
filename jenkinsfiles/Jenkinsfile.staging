@@ -30,7 +30,7 @@ spec:
     }
 
     options {
-        disableConcurrentBuilds()
+        disableConcurrentBuilds(abortPrevious: true)
     }
 
     environment {

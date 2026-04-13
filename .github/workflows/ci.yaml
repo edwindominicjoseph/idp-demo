@@ -155,7 +155,7 @@ jobs:
         run: |
           curl -fsSL -X POST \
             "http://46.62.207.133:30782/job/${{ steps.pipeline.outputs.job }}/buildWithParameters" \
-            --user "admin:${{ secrets.JENKINS_API_TOKEN }}" \
+            --user "edwin:${{ secrets.JENKINS_API_TOKEN }}" \
             --data-urlencode "SERVICE_NAME=${{ matrix.service }}"
 
   # ── Trivy image scan — one job per changed service (matrix) ───────────────

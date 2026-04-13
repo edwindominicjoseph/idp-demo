@@ -5,14 +5,6 @@ on:
     branches: ["**"]
   pull_request:
     branches: [develop, main]
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Target environment'
-        required: true
-        default: 'staging'
-        type: choice
-        options: [staging, prod]
 
 permissions:
   contents: read
@@ -26,21 +18,12 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      services: ${{ steps.all.outputs.services || steps.filter.outputs.changes }}
+      services: ${{ steps.filter.outputs.changes }}
     steps:
       - uses: actions/checkout@v4
 
-      # Manual dispatch — build all services
-      - name: Set all services
-        id: all
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo 'services=["boutique","adservice","cartservice","checkoutservice","currencyservice","emailservice","loadgenerator","paymentservice","productcatalogservice","recommendationservice","shippingservice"]' >> $GITHUB_OUTPUT
-
-      # Push/PR — build only changed services
       - uses: dorny/paths-filter@v3
         id: filter
-        if: github.event_name != 'workflow_dispatch'
         with:
           filters: |
             boutique:
@@ -152,13 +135,7 @@ jobs:
       - name: Determine Jenkins pipeline
         id: pipeline
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.environment }}" = "prod" ]; then
-              echo "job=homelab-prod" >> $GITHUB_OUTPUT
-            else
-              echo "job=homelab-staging" >> $GITHUB_OUTPUT
-            fi
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "job=homelab-prod" >> $GITHUB_OUTPUT
           else
             echo "job=homelab-staging" >> $GITHUB_OUTPUT

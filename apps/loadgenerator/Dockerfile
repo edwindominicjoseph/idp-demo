@@ -27,3 +27,4 @@ COPY --from=builder /install /usr/local
 COPY src/loadgenerator/locustfile.py .
 
 ENTRYPOINT locust --host="http://${FRONTEND_ADDR}" --headless -u "${USERS:-10}" -r "${RATE:-1}" 2>&1
+

@@ -31,4 +31,4 @@ images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-recommendationservice
   newTag: sha-42fe850
 - name: ghcr.io/edwindominicjoseph/idp-demo-shippingservice
-  newTag: sha-latest
+  newTag: sha-a37f186

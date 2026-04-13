@@ -13,7 +13,7 @@ images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-boutique
   newTag: sha-latest
 - name: ghcr.io/edwindominicjoseph/idp-demo-adservice
-  newTag: sha-latest
+  newTag: sha-67cc93d
 - name: ghcr.io/edwindominicjoseph/idp-demo-cartservice
   newTag: sha-1a83579
 - name: ghcr.io/edwindominicjoseph/idp-demo-checkoutservice

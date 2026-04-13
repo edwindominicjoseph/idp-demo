@@ -30,11 +30,7 @@ spec:
     }
 
     options {
-        throttleJobProperty(
-            categories: ['homelab-deploy'],
-            throttleEnabled: true,
-            throttleOption: 'category'
-        )
+        disableConcurrentBuilds()
     }
 
     environment {

@@ -27,37 +27,26 @@ jobs:
           filters: |
             boutique:
               - 'apps/boutique/**'
-              - '.github/workflows/ci.yaml'
             adservice:
               - 'apps/adservice/**'
-              - '.github/workflows/ci.yaml'
             cartservice:
               - 'apps/cartservice/**'
-              - '.github/workflows/ci.yaml'
             checkoutservice:
               - 'apps/checkoutservice/**'
-              - '.github/workflows/ci.yaml'
             currencyservice:
               - 'apps/currencyservice/**'
-              - '.github/workflows/ci.yaml'
             emailservice:
               - 'apps/emailservice/**'
-              - '.github/workflows/ci.yaml'
             loadgenerator:
               - 'apps/loadgenerator/**'
-              - '.github/workflows/ci.yaml'
             paymentservice:
               - 'apps/paymentservice/**'
-              - '.github/workflows/ci.yaml'
             productcatalogservice:
               - 'apps/productcatalogservice/**'
-              - '.github/workflows/ci.yaml'
             recommendationservice:
               - 'apps/recommendationservice/**'
-              - '.github/workflows/ci.yaml'
             shippingservice:
               - 'apps/shippingservice/**'
-              - '.github/workflows/ci.yaml'
 
   # ── Lint manifests (runs if any service changed) ───────────────────────────
   lint:

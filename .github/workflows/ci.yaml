@@ -129,6 +129,35 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
+  # ── Trigger Jenkins — one call per changed service after image is pushed ──
+  trigger-jenkins:
+    needs: [changes, build]
+    if: |
+      needs.build.result == 'success' &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+      fail-fast: false
+    steps:
+      - name: Determine Jenkins pipeline
+        id: pipeline
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "job=homelab-prod" >> $GITHUB_OUTPUT
+          else
+            echo "job=homelab-staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger Jenkins pipeline
+        run: |
+          curl -fsSL -X POST \
+            "http://46.62.207.133:30782/job/${{ steps.pipeline.outputs.job }}/buildWithParameters" \
+            --user "admin:${{ secrets.JENKINS_API_TOKEN }}" \
+            --data-urlencode "SERVICE_NAME=${{ matrix.service }}"
+
   # ── Trivy image scan — one job per changed service (matrix) ───────────────
   trivy-image:
     needs: [changes, build]

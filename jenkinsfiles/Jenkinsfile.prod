@@ -56,8 +56,7 @@ spec:
     }
 
     parameters {
-        string(name: 'SERVICE_NAME', defaultValue: '', description: 'Service being deployed (e.g. currency-service)')
-        string(name: 'IMAGE_TAG',    defaultValue: '', description: 'Image tag to deploy (e.g. sha-abc1234)')
+        string(name: 'SERVICE_NAME', defaultValue: 'boutique', description: 'Service being deployed')
     }
 
     stages {
@@ -66,7 +65,7 @@ spec:
         stage('Manual Approval Gate') {
             steps {
                 timeout(time: 1, unit: 'HOURS') {
-                    input message: "Approve prod deploy for ${params.SERVICE_NAME}:${params.IMAGE_TAG}?",
+                    input message: "Approve prod deploy for ${params.SERVICE_NAME}?",
                           ok: 'Deploy to Prod'
                 }
             }
@@ -87,6 +86,11 @@ spec:
 
                             git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git repo
                             cd repo && git checkout ${GIT_BRANCH}
+
+                            # Derive the same tag GitHub Actions produces: sha-<short-commit>
+                            IMAGE_TAG="sha-$(git rev-parse --short HEAD)"
+                            echo "IMAGE_TAG=${IMAGE_TAG}" > /tmp/image.env
+                            echo "Computed image tag: ${IMAGE_TAG}"
 
                             # Record current prod image tag as rollback reference (first entry only)
                             CURRENT_TAG=$(grep "newTag:" ${KUSTOMIZE_PATH} | head -1 | awk '{print $2}')
@@ -114,14 +118,20 @@ spec:
                         sh '''
                             cd repo
 
+                            # Restore IMAGE_TAG computed in baseline snapshot stage
+                            . /tmp/image.env
+
                             # Patch only this service's newTag — leaves other services unchanged
                             sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" ${KUSTOMIZE_PATH}
 
                             git add ${KUSTOMIZE_PATH}
-                            git commit -m "ci(prod): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
-                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
-
-                            echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            if git diff --cached --quiet; then
+                                echo "Image tag already at ${IMAGE_TAG} — no commit needed"
+                            else
+                                git commit -m "ci(prod): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
+                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
+                                echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            fi
                         '''
                     }
                 }
@@ -186,6 +196,7 @@ spec:
                         variable: 'GIT_TOKEN'
                     )]) {
                         sh '''
+                            . /tmp/image.env
                             DEPLOY_TIME=$(date +%s)
                             echo "Deploy time: ${DEPLOY_TIME}"
                             echo "Service: ${SERVICE_NAME} Image: ${IMAGE_TAG}"
@@ -200,7 +211,7 @@ spec:
     // ── Post-build ─────────────────────────────────────────────────────────
     post {
         failure {
-            echo "Prod pipeline FAILED — ${params.SERVICE_NAME}:${params.IMAGE_TAG}"
+            echo "Prod pipeline FAILED — ${params.SERVICE_NAME}"
         }
         always {
             echo "Prod pipeline complete — ${currentBuild.currentResult}"

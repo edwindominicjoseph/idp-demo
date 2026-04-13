@@ -53,7 +53,6 @@ spec:
 
     parameters {
         string(name: 'SERVICE_NAME', defaultValue: 'boutique', description: 'Service being deployed')
-        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag to deploy (e.g. sha-abc1234)')
     }
 
     stages {
@@ -102,14 +101,22 @@ spec:
                             cd repo
                             git checkout ${GIT_BRANCH}
 
+                            # Derive the same tag GitHub Actions produces: sha-<short-commit>
+                            IMAGE_TAG="sha-$(git rev-parse --short HEAD)"
+                            echo "Computed image tag: ${IMAGE_TAG}"
+
                             # Patch only this service's newTag — leaves other services unchanged
                             sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" ${KUSTOMIZE_PATH}
 
                             git add ${KUSTOMIZE_PATH}
-                            git commit -m "ci(staging): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
-                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
-
-                            echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            if git diff --cached --quiet; then
+                                echo "Image tag already at ${IMAGE_TAG} — no commit needed"
+                            else
+                                git commit -m "ci(staging): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
+                            echo "IMAGE_TAG=${IMAGE_TAG}" > /tmp/image.env
+                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
+                                echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            fi
                         '''
                     }
                 }

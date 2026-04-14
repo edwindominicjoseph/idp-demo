@@ -120,19 +120,16 @@ spec:
                         variable: 'ARGOCD_TOKEN'
                     )]) {
                         sh '''
-                            argocd login ${ARGOCD_SERVER} \
-                              --auth-token ${ARGOCD_TOKEN} \
-                              --plaintext \
-                              --grpc-web
+                            export ARGOCD_SERVER=${ARGOCD_SERVER}
+                            export ARGOCD_AUTH_TOKEN=${ARGOCD_TOKEN}
+                            export ARGOCD_OPTS="--plaintext --grpc-web"
 
-                            argocd app sync ${ARGOCD_APP} --plaintext --grpc-web
+                            argocd app sync ${ARGOCD_APP}
 
                             echo "Waiting for ${ARGOCD_APP} to become healthy (timeout: ${HEALTH_TIMEOUT}s)..."
                             argocd app wait ${ARGOCD_APP} \
                               --health \
-                              --timeout ${HEALTH_TIMEOUT} \
-                              --plaintext \
-                              --grpc-web
+                              --timeout ${HEALTH_TIMEOUT}
 
                             echo "Sync complete — ${ARGOCD_APP} is healthy"
                         '''

@@ -11,7 +11,7 @@ namespace: staging
 #     gitops/environments/staging/kustomization.yaml
 images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-boutique
-  newTag: sha-latest
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-adservice
   newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-cartservice

@@ -15,7 +15,7 @@ images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-adservice
   newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-cartservice
-  newTag: sha-1a83579
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-checkoutservice
   newTag: sha-a7d274f
 - name: ghcr.io/edwindominicjoseph/idp-demo-currencyservice

@@ -154,9 +154,15 @@ jobs:
 
       - name: Trigger Jenkins pipeline
         run: |
+          CRUMB=$(curl -fsSL \
+            "http://46.62.207.133:30782/crumbIssuer/api/json" \
+            --user "edwin:${{ secrets.JENKINS_API_TOKEN }}" \
+            | jq -r '.crumb')
+
           curl -fsSL -X POST \
             "http://46.62.207.133:30782/job/${{ steps.pipeline.outputs.job }}/buildWithParameters" \
             --user "edwin:${{ secrets.JENKINS_API_TOKEN }}" \
+            -H "Jenkins-Crumb: ${CRUMB}" \
             --data-urlencode "SERVICE_NAME=${{ matrix.service }}" \
             --data-urlencode "IMAGE_TAG=sha-${{ needs.build.outputs.image_tag }}"
 

@@ -11,24 +11,24 @@ namespace: staging
 #     gitops/environments/staging/kustomization.yaml
 images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-boutique
-  newTag: sha-latest
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-adservice
-  newTag: sha-67cc93d
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-cartservice
-  newTag: sha-1a83579
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-checkoutservice
-  newTag: sha-a7d274f
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-currencyservice
-  newTag: sha-7bb25ce
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-emailservice
-  newTag: sha-ed51510
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-loadgenerator
-  newTag: sha-0279a30
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-paymentservice
-  newTag: sha-13590ef
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-productcatalogservice
-  newTag: sha-a1ee6a1
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-recommendationservice
-  newTag: sha-42fe850
+  newTag: sha-d2304a2
 - name: ghcr.io/edwindominicjoseph/idp-demo-shippingservice
-  newTag: sha-a37f186
+  newTag: sha-d2304a2

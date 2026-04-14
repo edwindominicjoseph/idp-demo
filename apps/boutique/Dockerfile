@@ -1,6 +1,19 @@
-# Stub Dockerfile for CI validation — Phase 1
-# Replace with real Boutique frontend Dockerfile in CHG-PROD-2026-006
-FROM nginx:alpine
-LABEL org.opencontainers.image.source="https://github.com/edwindominicjoseph/idp-demo"
-LABEL org.opencontainers.image.description="IDP Demo — Boutique App (stub)"
- 
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+
+COPY src/frontend/go.mod src/frontend/go.sum ./
+RUN go mod download
+
+COPY src/frontend/ .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /go/bin/frontend .
+
+FROM gcr.io/distroless/static
+WORKDIR /src
+COPY --from=builder /go/bin/frontend /src/server
+COPY src/frontend/templates ./templates
+COPY src/frontend/static ./static
+
+ENV GOTRACEBACK=single
+EXPOSE 8080
+ENTRYPOINT ["/src/server"]

@@ -18,3 +18,4 @@ COPY src/currencyservice/ .
 
 EXPOSE 7000
 ENTRYPOINT ["node", "server.js"]
+

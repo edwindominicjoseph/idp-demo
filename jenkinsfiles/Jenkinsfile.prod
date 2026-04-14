@@ -21,27 +21,17 @@ spec:
     args: ["99d"]
     resources:
       requests:
-        cpu: "200m"
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "300m"
         memory: "256Mi"
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
-  - name: maven
-    image: maven:3.9-eclipse-temurin-17
-    command: [sleep]
-    args: ["99d"]
-    resources:
-      requests:
-        cpu: "200m"
-        memory: "512Mi"
-      limits:
-        cpu: "1"
-        memory: "1Gi"
-    env:
-    - name: MAVEN_OPTS
-      value: "-Xms128m -Xmx768m"
 '''
         }
+    }
+
+    options {
+        disableConcurrentBuilds()
     }
 
     environment {
@@ -56,8 +46,8 @@ spec:
     }
 
     parameters {
-        string(name: 'SERVICE_NAME', defaultValue: '', description: 'Service being deployed (e.g. currency-service)')
-        string(name: 'IMAGE_TAG',    defaultValue: '', description: 'Image tag to deploy (e.g. sha-abc1234)')
+        string(name: 'SERVICE_NAME', defaultValue: 'boutique', description: 'Service being deployed')
+        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag built by GitHub Actions (sha-<short-sha>)')
     }
 
     stages {
@@ -66,7 +56,7 @@ spec:
         stage('Manual Approval Gate') {
             steps {
                 timeout(time: 1, unit: 'HOURS') {
-                    input message: "Approve prod deploy for ${params.SERVICE_NAME}:${params.IMAGE_TAG}?",
+                    input message: "Approve prod deploy for ${params.SERVICE_NAME}?",
                           ok: 'Deploy to Prod'
                 }
             }
@@ -88,8 +78,11 @@ spec:
                             git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git repo
                             cd repo && git checkout ${GIT_BRANCH}
 
-                            # Record current prod image tag as rollback reference
-                            CURRENT_TAG=$(grep "newTag:" ${KUSTOMIZE_PATH} | awk '{print $2}')
+                            echo "Image tag from GitHub Actions: ${IMAGE_TAG}"
+                            echo "IMAGE_TAG=${IMAGE_TAG}" > /tmp/image.env
+
+                            # Record current prod image tag as rollback reference (first entry only)
+                            CURRENT_TAG=$(grep "newTag:" ${KUSTOMIZE_PATH} | head -1 | awk '{print $2}')
                             echo "ROLLBACK_TAG=${CURRENT_TAG}" > /tmp/baseline.env
                             echo "Rollback tag recorded: ${CURRENT_TAG}"
 
@@ -114,14 +107,20 @@ spec:
                         sh '''
                             cd repo
 
+                            # Restore IMAGE_TAG computed in baseline snapshot stage
+                            . /tmp/image.env
+
                             # Patch only this service's newTag — leaves other services unchanged
                             sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" ${KUSTOMIZE_PATH}
 
                             git add ${KUSTOMIZE_PATH}
-                            git commit -m "ci(prod): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
-                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
-
-                            echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            if git diff --cached --quiet; then
+                                echo "Image tag already at ${IMAGE_TAG} — no commit needed"
+                            else
+                                git commit -m "ci(prod): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
+                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
+                                echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            fi
                         '''
                     }
                 }
@@ -142,18 +141,16 @@ spec:
                               https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             chmod +x /usr/local/bin/argocd
 
-                            argocd login ${ARGOCD_SERVER} \
-                              --auth-token ${ARGOCD_TOKEN} \
-                              --insecure \
-                              --grpc-web
+                            export ARGOCD_SERVER=${ARGOCD_SERVER}
+                            export ARGOCD_AUTH_TOKEN=${ARGOCD_TOKEN}
+                            export ARGOCD_OPTS="--plaintext --grpc-web"
 
-                            argocd app sync ${ARGOCD_APP} --insecure
+                            argocd app sync ${ARGOCD_APP}
 
                             echo "Waiting for ${ARGOCD_APP} to become healthy (timeout: ${HEALTH_TIMEOUT}s)..."
                             argocd app wait ${ARGOCD_APP} \
                               --health \
-                              --timeout ${HEALTH_TIMEOUT} \
-                              --insecure
+                              --timeout ${HEALTH_TIMEOUT}
 
                             echo "Sync complete — ${ARGOCD_APP} is healthy"
                         '''
@@ -185,6 +182,7 @@ spec:
                         variable: 'GIT_TOKEN'
                     )]) {
                         sh '''
+                            . /tmp/image.env
                             DEPLOY_TIME=$(date +%s)
                             echo "Deploy time: ${DEPLOY_TIME}"
                             echo "Service: ${SERVICE_NAME} Image: ${IMAGE_TAG}"
@@ -199,7 +197,7 @@ spec:
     // ── Post-build ─────────────────────────────────────────────────────────
     post {
         failure {
-            echo "Prod pipeline FAILED — ${params.SERVICE_NAME}:${params.IMAGE_TAG}"
+            echo "Prod pipeline FAILED — ${params.SERVICE_NAME}"
         }
         always {
             echo "Prod pipeline complete — ${currentBuild.currentResult}"

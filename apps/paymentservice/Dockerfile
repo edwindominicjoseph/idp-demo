@@ -18,3 +18,4 @@ COPY src/paymentservice/ .
 
 EXPOSE 50051
 ENTRYPOINT ["node", "index.js"]
+

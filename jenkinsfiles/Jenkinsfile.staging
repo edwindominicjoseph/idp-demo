@@ -20,27 +20,17 @@ spec:
     args: ["99d"]
     resources:
       requests:
-        cpu: "200m"
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "300m"
         memory: "256Mi"
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
-  - name: maven
-    image: maven:3.9-eclipse-temurin-17
-    command: [sleep]
-    args: ["99d"]
-    resources:
-      requests:
-        cpu: "200m"
-        memory: "512Mi"
-      limits:
-        cpu: "1"
-        memory: "1Gi"
-    env:
-    - name: MAVEN_OPTS
-      value: "-Xms128m -Xmx768m"
 '''
         }
+    }
+
+    options {
+        disableConcurrentBuilds()
     }
 
     environment {
@@ -53,7 +43,7 @@ spec:
 
     parameters {
         string(name: 'SERVICE_NAME', defaultValue: 'boutique', description: 'Service being deployed')
-        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag to deploy (e.g. sha-abc1234)')
+        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag built by GitHub Actions (sha-<short-sha>)')
     }
 
     stages {
@@ -102,14 +92,19 @@ spec:
                             cd repo
                             git checkout ${GIT_BRANCH}
 
+                            echo "Image tag from GitHub Actions: ${IMAGE_TAG}"
+
                             # Patch only this service's newTag — leaves other services unchanged
                             sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" ${KUSTOMIZE_PATH}
 
                             git add ${KUSTOMIZE_PATH}
-                            git commit -m "ci(staging): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
-                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
-
-                            echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            if git diff --cached --quiet; then
+                                echo "Image tag already at ${IMAGE_TAG} — no commit needed"
+                            else
+                                git commit -m "ci(staging): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
+                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
+                                echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
+                            fi
                         '''
                     }
                 }
@@ -125,18 +120,16 @@ spec:
                         variable: 'ARGOCD_TOKEN'
                     )]) {
                         sh '''
-                            argocd login ${ARGOCD_SERVER} \
-                              --auth-token ${ARGOCD_TOKEN} \
-                              --insecure \
-                              --grpc-web
+                            export ARGOCD_SERVER=${ARGOCD_SERVER}
+                            export ARGOCD_AUTH_TOKEN=${ARGOCD_TOKEN}
+                            export ARGOCD_OPTS="--plaintext --grpc-web"
 
-                            argocd app sync ${ARGOCD_APP} --insecure
+                            argocd app sync ${ARGOCD_APP}
 
                             echo "Waiting for ${ARGOCD_APP} to become healthy (timeout: ${HEALTH_TIMEOUT}s)..."
                             argocd app wait ${ARGOCD_APP} \
                               --health \
-                              --timeout ${HEALTH_TIMEOUT} \
-                              --insecure
+                              --timeout ${HEALTH_TIMEOUT}
 
                             echo "Sync complete — ${ARGOCD_APP} is healthy"
                         '''
@@ -155,7 +148,7 @@ spec:
 
     post {
         failure {
-            echo "Staging pipeline FAILED — ${params.SERVICE_NAME}:${params.IMAGE_TAG}"
+            echo "Staging pipeline FAILED — ${params.SERVICE_NAME} @ ${params.IMAGE_TAG}"
         }
         always {
             echo "Staging pipeline complete — ${currentBuild.currentResult}"

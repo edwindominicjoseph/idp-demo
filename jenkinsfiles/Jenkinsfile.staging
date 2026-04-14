@@ -30,7 +30,7 @@ spec:
     }
 
     options {
-        disableConcurrentBuilds(abortPrevious: true)
+        disableConcurrentBuilds()
     }
 
     environment {
@@ -43,6 +43,7 @@ spec:
 
     parameters {
         string(name: 'SERVICE_NAME', defaultValue: 'boutique', description: 'Service being deployed')
+        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag built by GitHub Actions (sha-<short-sha>)')
     }
 
     stages {
@@ -91,9 +92,7 @@ spec:
                             cd repo
                             git checkout ${GIT_BRANCH}
 
-                            # Derive the same tag GitHub Actions produces: sha-<short-commit>
-                            IMAGE_TAG="sha-$(git rev-parse --short HEAD)"
-                            echo "Computed image tag: ${IMAGE_TAG}"
+                            echo "Image tag from GitHub Actions: ${IMAGE_TAG}"
 
                             # Patch only this service's newTag — leaves other services unchanged
                             sed -i "/idp-demo-${SERVICE_NAME}/{n;s|newTag:.*|newTag: ${IMAGE_TAG}|}" ${KUSTOMIZE_PATH}
@@ -103,7 +102,6 @@ spec:
                                 echo "Image tag already at ${IMAGE_TAG} — no commit needed"
                             else
                                 git commit -m "ci(staging): ${SERVICE_NAME} → ${IMAGE_TAG} [skip ci]"
-                            echo "IMAGE_TAG=${IMAGE_TAG}" > /tmp/image.env
                                 git push https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git ${GIT_BRANCH}
                                 echo "Image tag updated to ${IMAGE_TAG} in ${KUSTOMIZE_PATH}"
                             fi
@@ -153,7 +151,7 @@ spec:
 
     post {
         failure {
-            echo "Staging pipeline FAILED — ${params.SERVICE_NAME}:${params.IMAGE_TAG}"
+            echo "Staging pipeline FAILED — ${params.SERVICE_NAME} @ ${params.IMAGE_TAG}"
         }
         always {
             echo "Staging pipeline complete — ${currentBuild.currentResult}"

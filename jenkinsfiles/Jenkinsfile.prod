@@ -31,7 +31,7 @@ spec:
     }
 
     options {
-        disableConcurrentBuilds(abortPrevious: true)
+        disableConcurrentBuilds()
     }
 
     environment {
@@ -47,6 +47,7 @@ spec:
 
     parameters {
         string(name: 'SERVICE_NAME', defaultValue: 'boutique', description: 'Service being deployed')
+        string(name: 'IMAGE_TAG',    defaultValue: 'sha-latest', description: 'Image tag built by GitHub Actions (sha-<short-sha>)')
     }
 
     stages {
@@ -77,10 +78,8 @@ spec:
                             git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/edwindominicjoseph/idp-demo.git repo
                             cd repo && git checkout ${GIT_BRANCH}
 
-                            # Derive the same tag GitHub Actions produces: sha-<short-commit>
-                            IMAGE_TAG="sha-$(git rev-parse --short HEAD)"
+                            echo "Image tag from GitHub Actions: ${IMAGE_TAG}"
                             echo "IMAGE_TAG=${IMAGE_TAG}" > /tmp/image.env
-                            echo "Computed image tag: ${IMAGE_TAG}"
 
                             # Record current prod image tag as rollback reference (first entry only)
                             CURRENT_TAG=$(grep "newTag:" ${KUSTOMIZE_PATH} | head -1 | awk '{print $2}')

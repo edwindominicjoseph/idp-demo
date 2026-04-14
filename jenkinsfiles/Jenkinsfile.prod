@@ -141,18 +141,18 @@ spec:
                               https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             chmod +x /usr/local/bin/argocd
 
-                            echo "y" | argocd login ${ARGOCD_SERVER} \
+                            argocd login ${ARGOCD_SERVER} \
                               --auth-token ${ARGOCD_TOKEN} \
-                              --insecure \
+                              --plaintext \
                               --grpc-web
 
-                            argocd app sync ${ARGOCD_APP} --insecure --grpc-web
+                            argocd app sync ${ARGOCD_APP} --plaintext --grpc-web
 
                             echo "Waiting for ${ARGOCD_APP} to become healthy (timeout: ${HEALTH_TIMEOUT}s)..."
                             argocd app wait ${ARGOCD_APP} \
                               --health \
                               --timeout ${HEALTH_TIMEOUT} \
-                              --insecure \
+                              --plaintext \
                               --grpc-web
 
                             echo "Sync complete — ${ARGOCD_APP} is healthy"

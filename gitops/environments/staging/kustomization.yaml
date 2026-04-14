@@ -27,7 +27,7 @@ images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-paymentservice
   newTag: sha-cef4f94
 - name: ghcr.io/edwindominicjoseph/idp-demo-productcatalogservice
-  newTag: sha-d2304a2
+  newTag: sha-cef4f94
 - name: ghcr.io/edwindominicjoseph/idp-demo-recommendationservice
   newTag: sha-cef4f94
 - name: ghcr.io/edwindominicjoseph/idp-demo-shippingservice

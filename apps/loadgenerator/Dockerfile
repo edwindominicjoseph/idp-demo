@@ -1,30 +1,21 @@
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM python:3.14.3-alpine@sha256:faee120f7885a06fcc9677922331391fa690d911c020abb9e8025ff3d908e510 AS base
-
-FROM base AS builder
+FROM python:3.13-alpine AS builder
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-RUN apk update \
-    && apk add --no-cache g++ linux-headers \
-    && rm -rf /var/cache/apk/*
+RUN apk add --no-cache g++ linux-headers
 
 COPY src/loadgenerator/requirements.txt .
 RUN pip install --prefix="/install" -r requirements.txt
 
-FROM base
+FROM python:3.13-alpine
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV GEVENT_SUPPORT=True
 
-RUN apk update \
-    && apk add --no-cache libstdc++ \
-    && rm -rf /var/cache/apk/*
+RUN apk add --no-cache libstdc++
 
 WORKDIR /loadgen
 COPY --from=builder /install /usr/local
 COPY src/loadgenerator/locustfile.py .
 
 ENTRYPOINT locust --host="http://${FRONTEND_ADDR}" --headless -u "${USERS:-10}" -r "${RATE:-1}" 2>&1
-

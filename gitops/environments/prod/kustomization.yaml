@@ -29,6 +29,6 @@ images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-productcatalogservice
   newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-recommendationservice
-  newTag: 
+  newTag: sha-d86ec95
 - name: ghcr.io/edwindominicjoseph/idp-demo-shippingservice
   newTag: sha-d86ec95

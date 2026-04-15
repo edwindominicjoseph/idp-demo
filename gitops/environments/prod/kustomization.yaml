@@ -11,7 +11,7 @@ namespace: prod
 #     gitops/environments/prod/kustomization.yaml
 images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-boutique
-  newTag: 
+  newTag: sha-d86ec95
 - name: ghcr.io/edwindominicjoseph/idp-demo-adservice
   newTag: 
 - name: ghcr.io/edwindominicjoseph/idp-demo-cartservice

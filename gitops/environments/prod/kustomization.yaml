@@ -21,7 +21,7 @@ images:
 - name: ghcr.io/edwindominicjoseph/idp-demo-currencyservice
   newTag: sha-d86ec95
 - name: ghcr.io/edwindominicjoseph/idp-demo-emailservice
-  newTag: 
+  newTag: sha-d86ec95
 - name: ghcr.io/edwindominicjoseph/idp-demo-loadgenerator
   newTag: sha-d86ec95
 - name: ghcr.io/edwindominicjoseph/idp-demo-paymentservice
